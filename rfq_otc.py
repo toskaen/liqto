@@ -7,7 +7,7 @@ import json
 import time
 from decimal import Decimal, getcontext
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 # Liquid CT works with 8 decimal places – guarantee exact arithmetic.
 getcontext().prec = 16
@@ -45,7 +45,7 @@ class LiquidRFQProtocol:
     def __init__(self, rpc_url: str):
         self.rpc = AuthServiceProxy(rpc_url)
         
-    def create_rfq(self, client_addr: str, sell_asset: str, buy_asset: str, 
+    def create_rfq(self, client_addr: str, sell_asset: str, buy_asset: str,
                    approx_amount: float, expiry_seconds: int = 300) -> RFQ:
         """Create RFQ - client wants to trade"""
         rfq_id = hashlib.sha256(
@@ -134,8 +134,73 @@ class LiquidRFQProtocol:
             message,
         )
 
-    def create_atomic_settlement(self, rfq: RFQ, quote: Quote) -> str:
-        """Create confidential atomic swap PSET for settlement"""
+    def _descriptor_key(self, address: str) -> str:
+        """Return descriptor key expression for wallet-owned address."""
+
+        info = self.rpc.getaddressinfo(address)
+        pubkey = info["pubkey"]
+        fingerprint = info.get("hdmasterfingerprint")
+        path = info.get("hdkeypath")
+
+        if fingerprint and path:
+            # hdkeypath is of the form m/84'/1776'/0'/0/0. Descriptor expects
+            # [fingerprint/84'/1776'/0'/0/0]PUBKEY format.
+            descriptor_path = path[1:]  # drop leading "m"
+            return f"[{fingerprint}{descriptor_path}]{pubkey}"
+
+        return pubkey
+
+    def build_joint_timelocked_address(
+        self, client_addr: str, dealer_addr: str, csv_delay: int = 10
+    ) -> Tuple[str, str]:
+        """Create a miniscript-driven address protecting client settlement.
+
+        The policy allows the dealer to spend immediately, while the client
+        can reclaim funds after `csv_delay` blocks. This demonstrates usage of
+        Liquid-native opcodes like OP_CSV via Miniscript while keeping the
+        flow atomic and confidential.
+        """
+
+        client_key = self._descriptor_key(client_addr)
+        dealer_key = self._descriptor_key(dealer_addr)
+
+        miniscript_policy = (
+            f"or_i(pk({dealer_key}),and_v(v:pk({client_key}),older({csv_delay})))"
+        )
+        descriptor = f"wsh({miniscript_policy})"
+
+        descriptor_info = self.rpc.getdescriptorinfo(descriptor)
+        # Import as watch-only so wallet can analyze future spends if needed.
+        import_result = self.rpc.importdescriptors([
+            {
+                "desc": descriptor_info["descriptor"],
+                "timestamp": "now",
+                "label": "rfq_joint_timelock",
+                "active": False,
+            }
+        ])[0]
+
+        if not import_result.get("success", False):
+            error = import_result.get("error")
+            if not error or "exists" not in error.get("message", "").lower():
+                raise RuntimeError(
+                    f"Descriptor import failed: {json.dumps(import_result)}"
+                )
+
+        base_address = self.rpc.deriveaddresses(descriptor_info["descriptor"])[0]
+        master_blinding = self.rpc.dumpmasterblindingkey()
+        confidential_address = self.rpc.createblindedaddress(
+            base_address, master_blinding
+        )
+
+        return confidential_address, descriptor_info["descriptor"]
+
+    def create_atomic_settlement(self, rfq: RFQ, quote: Quote) -> Tuple[str, str]:
+        """Create confidential atomic swap PSET for settlement.
+
+        Returns the blinded PSET and the Miniscript descriptor securing the
+        dealer's received L-BTC leg.
+        """
 
         # Step 1: Dealer creates partially blinded transaction
         # Dealer sends exact_amount_buy to client
@@ -175,13 +240,11 @@ class LiquidRFQProtocol:
             {"txid": client_input['txid'], "vout": client_input['vout']}
         ]
 
+        protected_address, descriptor = self.build_joint_timelocked_address(
+            rfq.client_address, quote.dealer_address
+        )
+
         outputs = [
-            {
-                quote.dealer_address: {
-                    "asset": rfq.asset_to_sell,
-                    "amount": str(target_sell)
-                }
-            },
             {
                 rfq.client_address: {
                     "asset": rfq.asset_to_buy,
@@ -189,6 +252,13 @@ class LiquidRFQProtocol:
                 }
             }
         ]
+
+        outputs.append({
+            protected_address: {
+                "asset": rfq.asset_to_sell,
+                "amount": str(target_sell)
+            }
+        })
 
         if dealer_change > Decimal("0.00000001"):
             outputs.append({
@@ -230,7 +300,7 @@ class LiquidRFQProtocol:
         # Blind to hide amounts/asset ids on-chain
         blinded_psbt = self.rpc.blindpsbt(enriched_psbt)
 
-        return blinded_psbt
+        return blinded_psbt, descriptor
 
     def sign_and_broadcast(self, pset: str, dealer_addr: str, client_addr: str) -> str:
         """Both parties sign PSET and broadcast"""
@@ -299,9 +369,9 @@ def demo_confidential_otc_settlement():
     print("=== Confidential OTC Settlement Demo ===\n")
     
     # Setup: Create addresses for client and dealers
-    client_addr = rpc.getnewaddress("client", "bech32")
-    dealer1_addr = rpc.getnewaddress("dealer1", "bech32")
-    dealer2_addr = rpc.getnewaddress("dealer2", "bech32")
+    client_addr = rpc.getnewaddress("client", "blech32")
+    dealer1_addr = rpc.getnewaddress("dealer1", "blech32")
+    dealer2_addr = rpc.getnewaddress("dealer2", "blech32")
     
     print(f"Client address: {client_addr}")
     print(f"Dealer1 address: {dealer1_addr}")
@@ -375,9 +445,11 @@ def demo_confidential_otc_settlement():
     print("Creating PSET for atomic swap...")
     
     try:
-        pset = protocol.create_atomic_settlement(rfq, best_quote)
+        pset, descriptor = protocol.create_atomic_settlement(rfq, best_quote)
         print(f"PSET created: {pset[:50]}...")
-        
+        print("Timelocked settlement descriptor (Miniscript):")
+        print(f"  {descriptor}\n")
+
         print("\nBoth parties signing...")
         txid = protocol.sign_and_broadcast(pset, best_quote.dealer_address, rfq.client_address)
         

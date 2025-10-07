@@ -14,7 +14,9 @@ LIQTO explores how on-chain privacy tech and open coordination layers can addres
 This repository already contains a real RFQ sequence using core Liquid primitives:
 - **Confidential Transactions** ensure amounts remain private through Pedersen commitments.
 - **Partially Signed Elements Transactions (PSETs)** deliver atomic settlement and remove escrow risk.
+- **Miniscript-guarded settlement outputs** use `OP_CSV` timelocks so the client can reclaim funds if a dealer stalls, showcasing Elements' extended opcode support.
 - **Native Elements RPC calls** drive genuine blockchain operations instead of simulations.
+- **Confidential `blech32` addresses** are used for every participant to stay aligned with Liquid best practices.
 - **Two-minute finality** by leveraging Liquid’s one-minute blocks with a single confirmation target.
 
 The `rfq_otc.py` script wires these pieces together to demonstrate an end-to-end trade on Liquid regtest.
