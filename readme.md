@@ -1,100 +1,194 @@
-# LIQTO: Confidential OTC RFQ Demo on Liquid
+# LIQTO — Confidential OTC RFQ Demo on Liquid (regtest)
 
-## Overview
-LIQTO demonstrates a functioning request-for-quote (RFQ) flow for bilateral, confidential settlement on the Liquid Network. The project focuses on showing how Bitcoin-adjacent infrastructure can deliver fast, final, and private over-the-counter trades without requiring custodial intermediaries.
+A compact, auditable demo that runs a full **RFQ → Quote → Atomic settlement** flow on a local Liquid-style chain (Elements **regtest**). It uses **Confidential Transactions (CT)**, **PSET**, and a **CSV timelock** reclaim path — no custodians, amounts are blinded.
 
-The repository is intentionally compact so reviewers can audit the MVP quickly: a single Python script (under 500 lines) plus a regtest helper script. The code depends only on `python-bitcoinrpc` and exercises **live** Elements RPC calls, which means every demo run interacts with a real Liquid-style chain.
+---
 
-## Core Problem: Transparent Liquidity & Limited Interaction
-Most OTC desks currently depend on fragmented chat channels or opaque spreadsheets, creating two complementary issues:
+## What’s in this repo
 
-- **Transparent liquidity gaps** – Order intent is hidden from the wider market, reducing the ability to source competitive quotes.
-- **Limited interaction options** – Negotiations happen via manual outreach, delaying price discovery and eroding trust.
+* `rfq_otc.py` – the end-to-end demo: creates RFQ, gathers two quotes, builds a blinded joint-settlement PSET with a CSV reclaim path, signs, and broadcasts.
+* Uses **blech32** addresses for on-chain payments and **legacy (P2PKH)** addresses for message signing (`signmessage` / `verifymessage`), which Elements requires. The script handles this automatically.
 
-LIQTO explores how on-chain privacy tech and open coordination layers can address both challenges while keeping counterparties in control of their keys and trade data.
+---
 
-## Current Capabilities
-This repository already contains a real RFQ sequence using core Liquid primitives:
+## Prerequisites
 
-- **Confidential Transactions** ensure amounts remain private through Pedersen commitments.
-- **Partially Signed Elements Transactions (PSETs)** deliver atomic settlement and remove escrow risk.
-- **Miniscript-guarded settlement outputs** use `OP_CSV` timelocks so the client can reclaim funds if a dealer stalls, showcasing Elements' extended opcode support.
-- **Native Elements RPC calls** drive genuine blockchain operations instead of simulations.
-- **Confidential `blech32` addresses** are used for every participant to stay aligned with Liquid best practices.
-- **Two-minute finality** by leveraging Liquid’s one-minute blocks with a single confirmation target.
+* **Bitcoin Core** (unpacked somewhere in `$HOME/bitcoin-<ver>/bin`)
+* **Elements Core** (on your PATH; tested with 23.x)
+* **Python 3.10+** and `python-bitcoinrpc`
 
-The `rfq_otc.py` script wires these pieces together to demonstrate an end-to-end trade on Liquid regtest.
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-### MVP Verification Checklist
-Triple-check the MVP functionality with this short runbook:
+---
 
-1. **Environment sanity** – Elements `0.21.0.3+` is on your `PATH`, Python is `3.11+`, and `python-bitcoinrpc` is installed.
-2. **Regtest boot** – `bash setup_liquid_regtest.sh` returns `Liquid regtest ready!` and `elements-cli -chain=liquidregtest getblockcount` succeeds (pass `-chain=elementsregtest` if running an older Elements build).
-3. **RFQ loop** – `python3 rfq_otc.py` finishes with `✅ Settlement complete!` and prints the blinded transaction ID.
-4. **Privacy guarantees** – `elements-cli -chain=liquidregtest gettransaction <txid>` shows blinded outputs (amounts hidden).
-5. **Timelock assurance** – `elements-cli -chain=elementsregtest validateaddress <protected_address>` reveals the imported Miniscript descriptor containing `older(...)`.
+## 1) Start Bitcoin Core on an isolated regtest
 
-If any step fails, wipe `~/.elements/liquidregtest` (or `~/.elements/elementsregtest` on older builds), restart `elementsd`, and rerun the commands.
+This keeps mainnet/testnet untouched by using a separate datadir.
 
-## Unique Positioning for PlanB
-PlanB is prioritising venues that can aggregate **deep, private liquidity** for institutional OTC flows. LIQTO supports that mandate in three ways:
-
-1. **RFQ native to Liquid** – Dealers and clients interact through blinded addresses, making LIQTO an on-chain RFQ rail rather than a chat workflow.
-2. **Provable settlement privacy** – Every trade terminates in a Confidential Transaction with an optional reclaim path for the client, aligning with desks that need guaranteed no-leak execution.
-3. **Composable coordination layer** – The RFQ artefacts are simple JSON payloads that can plug into PlanB’s preferred coordination layer (e.g., Nostr or bespoke APIs) without diluting custody.
-
-These properties let the MVP act as a PlanB showcase: deterministic settlement, verifiable privacy, and readiness for additional liquidity modules.
-
-For a tabular breakdown of MVP scope, validation steps, and positioning language, see [`docs/mvp_scope.md`](docs/mvp_scope.md).
-
-## Proposed Solution Extensions
-To unlock broader liquidity while keeping privacy guarantees, we propose augmenting the demo with open coordination concepts:
-
-### Trade Matching via Nostr Events
-- Publish anonymized RFQs as Nostr events, allowing market makers to subscribe without revealing counterparty identities.
-- Use event tagging to signal asset pairs, size bands, expiry windows, and reputational metadata.
-- Allow responders to broadcast encrypted quotes back to the requester using Nostr direct messages, which then transition into the existing PSET workflow.
-- Maintain settlement privacy by executing only the matched trades on Liquid; unmatched intents remain ephemeral in the Nostr relay ecosystem.
-
-### Additional Collaboration Ideas
-- Introduce reputation scoring for liquidity providers using signed attestations or proof-of-fulfillment events.
-- Layer in rate-limiting or staking mechanics to reduce spam while preserving permissionless access.
-- Explore cross-market data feeds to benchmark quotes against public markets for transparency.
-
-## Getting Started
-### Prerequisites
-- Elements Core (`elementsd` / `elements-cli`) v0.21.0.3 or newer available in your `PATH`.
-- Elements must be compiled with wallet support (``--enable-wallet``) so commands like `blindpsbt`, `walletprocesspsbt`, and `dumpmasterblindingkey` exist.
-- Python 3.11 or later.
-- [`python-bitcoinrpc`](https://pypi.org/project/python-bitcoinrpc/) installed (see `requirements.txt`).
-- Ability to unlock the default Elements wallet (the demo signs messages and transactions).
-
-### Run the Demo
 ```bash
-# 1. Start Liquid regtest
-bash setup_liquid_regtest.sh
+# Paths
+BTC="$HOME/bitcoin-28.1/bin"   # adjust if needed
 
-# 2. Install Python dependency
-pip install -r requirements.txt
+# Dedicated datadir + config
+mkdir -p ~/.bitcoin-regtest
+cat > ~/.bitcoin-regtest/bitcoin.conf <<'EOF'
+regtest=1
+daemon=1
+txindex=1
 
-# 3. Execute the RFQ example
-python3 rfq_otc.py
+[regtest]
+rpcuser=user3
+rpcpassword=password3
+rpcbind=127.0.0.1
+rpcallowip=127.0.0.1
+rpcport=18443
+port=18444
+fallbackfee=0.0002
+EOF
 
-# 4. Inspect the blinded settlement transaction (optional)
-elements-cli -chain=liquidregtest gettransaction <txid>
+# Start + wait
+"$BTC/bitcoind" -datadir="$HOME/.bitcoin-regtest" -daemon
+"$BTC/bitcoin-cli" -datadir="$HOME/.bitcoin-regtest" -regtest -rpcwait getblockchaininfo
+
+# Create wallet and mine spendable coins
+"$BTC/bitcoin-cli" -datadir="$HOME/.bitcoin-regtest" -regtest createwallet dev
+ADDR=$("$BTC/bitcoin-cli" -datadir="$HOME/.bitcoin-regtest" -regtest -rpcwallet=dev getnewaddress)
+"$BTC/bitcoin-cli" -datadir="$HOME/.bitcoin-regtest" -regtest generatetoaddress 101 "$ADDR"
+"$BTC/bitcoin-cli" -datadir="$HOME/.bitcoin-regtest" -regtest -rpcwallet=dev getbalances
 ```
 
-### Regtest readiness guardrail
-The demo now performs a pre-flight checklist before generating any addresses:
+---
 
-1. **RPC connectivity** – Fails fast if the client cannot reach `elementsd` on regtest.
-2. **Chain validation** – Aborts when the node reports anything other than `elementsregtest`/`liquidregtest`.
-3. **Wallet availability** – Confirms that a wallet with private keys is loaded and unlocked.
-4. **Critical RPC coverage** – Verifies support for `blindpsbt`, `walletprocesspsbt`, `dumpmasterblindingkey`, and `signmessage`.
+## 2) Start Elements (Liquid) regtest with peg-in validation
 
-If a check fails, the script raises an `EnvironmentError` with explicit remediation steps
-(e.g., unlocking the wallet or upgrading Elements). Resolve the issue, rerun `setup_liquid_regtest.sh`,
-and execute the demo again.
+We’ll peg in regtest BTC → L-BTC on Elements.
 
-## Next Steps
-Community contributions are welcome to prototype the Nostr trade-matching layer, integrate additional liquidity sources, or refine the UX for institutional desks. Feel free to open issues, share feedback, or suggest interoperable designs.
+```bash
+# Clean chain if needed (optional)
+pkill -f elementsd || true
+rm -rf ~/.elements/elementsregtest
+
+# Start Elements with mainchain RPC wired up for peg-ins
+elementsd -daemon -chain=elementsregtest -rpcport=18884 \
+  -txindex=1 -acceptnonstdtxn=1 -fallbackfee=0.0002 \
+  -rpcuser=user -rpcpassword=pass \
+  -validatepegin=1 \
+  -mainchainrpchost=127.0.0.1 \
+  -mainchainrpcport=18443 \
+  -mainchainrpcuser=user3 \
+  -mainchainrpcpassword=password3
+
+# Wait for RPC
+elements-cli -rpcwait -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass -getinfo
+```
+
+Create a wallet that supports `getpeginaddress` (non-descriptor):
+
+```bash
+elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass \
+  -named createwallet wallet_name=peg descriptors=false disable_private_keys=false blank=false
+```
+
+---
+
+## 3) Peg in BTC to L-BTC
+
+```bash
+# Get peg-in address from Elements
+PEGJSON=$(elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass -rpcwallet=peg getpeginaddress)
+PEGADDR=$(echo "$PEGJSON" | jq -r '.mainchain_address')
+
+# Send 1 BTC on regtest to the peg-in address, then confirm 10 blocks
+bc() { "$HOME/bitcoin-28.1/bin/bitcoin-cli" -datadir="$HOME/.bitcoin-regtest" -regtest "$@"; }
+TXID=$(bc -rpcwallet=dev sendtoaddress "$PEGADDR" 1)
+ADDR=$(bc -rpcwallet=dev getnewaddress)
+bc generatetoaddress 10 "$ADDR"
+
+# Produce proof + raw
+PROOF=$(bc gettxoutproof '["'"$TXID"'"]')
+RAW=$(bc getrawtransaction "$TXID")
+
+# Claim on Elements, then confirm 1 block
+CLAIMTX=$(elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass -rpcwallet=peg claimpegin "$RAW" "$PROOF")
+MADDR=$(elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass -rpcwallet=peg getnewaddress "" legacy)
+UADDR=$(elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass -rpcwallet=peg getaddressinfo "$MADDR" | jq -r '.unconfidential // .address')
+elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass generatetoaddress 1 "$UADDR"
+
+# Check L-BTC balance
+elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass -rpcwallet=peg getbalances
+```
+
+---
+
+## 4) Run the LIQTO demo
+
+Point the script at your **peg** wallet:
+
+```bash
+cd ~/Desktop/liqto
+export ELEMENTS_RPC="http://user:pass@127.0.0.1:18884/wallet/peg"
+python3 rfq_otc.py
+```
+
+You should see:
+
+* Pre-flight checks (chain/wallet/RPCs)
+* Creation of **pay** (blech32) and **signing** (legacy) addresses
+* Issuance of a demo asset (as L-USDt)
+* Two dealer quotes
+* Creation of a blinded PSET with a CSV timelock
+* Signing, broadcast, and a settlement TXID
+
+To inspect the transaction:
+
+```bash
+TXID=<printed-txid>
+elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=user -rpcpassword=pass gettransaction "$TXID"
+# Amounts should be blinded (value commitments instead of clear amounts).
+```
+
+---
+
+## Notes on addresses & signing
+
+* **On-chain settlement** uses **blech32** confidential addresses.
+* **Message signing** uses **legacy (P2PKH)** addresses because Elements’ `signmessage`/`verifymessage` operate on legacy keys.
+* The script **creates and binds both** (pay + signing) per participant; you don’t need to do anything extra.
+
+---
+
+## Troubleshooting
+
+* **“Address does not refer to key”**
+  You tried to sign with a confidential address. The script now uses a separate legacy signing address; re-run the demo.
+
+* **Fee estimation failed (Bitcoin regtest)**
+  Ensure `fallbackfee=0.0002` is present in `~/.bitcoin-regtest/bitcoin.conf` (under `[regtest]`), or set a manual fee:
+
+  ```bash
+  "$BTC/bitcoin-cli" -datadir="$HOME/.bitcoin-regtest" -regtest -rpcwallet=dev settxfee 0.0001
+  ```
+
+* **Elements lock / already running**
+  Only one `elementsd` instance per datadir. If needed:
+
+  ```bash
+  pkill -f elementsd
+  rm -f ~/.elements/elementsregtest/.lock
+  ```
+
+* **Old Elements builds**
+  Some releases use `-chain=liquidregtest` instead of `elementsregtest`. Adjust the `-chain` flag and CLI calls accordingly.
+
+---
+
+## Why this matters (quick)
+
+* **Privacy by default** – CT hides sizes from observers.
+* **No escrow risk** – atomic settlement via PSET.
+* **Safety valve** – CSV timelock lets the client reclaim funds if a dealer stalls.
+* **Composable RFQ** – signed JSON payloads can ride over Nostr/APIs later without changing settlement.
+
+Happy testing 💚
