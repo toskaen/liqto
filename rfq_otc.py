@@ -122,7 +122,34 @@ def ensure_regtest_readiness(rpc: AuthServiceProxy) -> dict:
         "version": network_info.get("version"),
         "subversion": network_info.get("subversion"),
     }
-        
+
+
+def ensure_mature_lbtc_balance(
+    rpc: AuthServiceProxy, mining_addr: str, target_balance: Decimal = Decimal("2")
+) -> Decimal:
+    """Make sure the wallet owns enough matured L-BTC for demo asset issuance.
+
+    Asset issuance spends native L-BTC as fees, so a freshly started regtest
+    node must mine blocks until some coinbase rewards reach maturity.  This
+    helper mines in batches of 101 blocks (enough for the first coinbase to
+    mature) until the wallet's trusted balance meets ``target_balance``.
+    """
+
+    for _ in range(3):
+        balances = rpc.getbalances()
+        trusted = Decimal(str(balances.get("mine", {}).get("trusted", "0")))
+        if trusted >= target_balance:
+            return trusted
+
+        # Mine another batch of blocks and re-check once confirmations accrue.
+        rpc.generatetoaddress(101, mining_addr)
+
+    raise RuntimeError(
+        "Unable to obtain matured L-BTC for the demo even after mining. "
+        "Verify your regtest node is not running with `-minrelaytxfee` too "
+        "high and that the wallet can receive block rewards."
+    )
+
     def create_rfq(self, client_addr: str, sell_asset: str, buy_asset: str,
                    approx_amount: float, expiry_seconds: int = 300) -> RFQ:
         """Create RFQ - client wants to trade"""
@@ -472,13 +499,22 @@ def demo_confidential_otc_settlement():
     
     # Fund addresses with L-BTC and L-USDt (simulate)
     # In real scenario: peg-in BTC to get L-BTC
-    rpc.generatetoaddress(101, client_addr)  # Mine to get L-BTC
+    print("Ensuring wallet has matured L-BTC for issuance fees...")
+    matured_balance = ensure_mature_lbtc_balance(rpc, client_addr)
+    print(f"Matured L-BTC balance: {matured_balance} L-BTC\n")
     
     # Get asset IDs (L-BTC is native, L-USDt would be issued asset)
     l_btc_asset = rpc.dumpassetlabels()['bitcoin']
     
     # For demo: issue L-USDt test asset
-    l_usdt_asset = rpc.issueasset(100000, 0)['asset']
+    try:
+        l_usdt_asset = rpc.issueasset(100000, 0)['asset']
+    except JSONRPCException as exc:
+        raise RuntimeError(
+            "Failed to issue demo asset. Ensure the regtest wallet has matured "
+            "L-BTC to cover issuance fees and supports confidential transactions. "
+            f"Underlying RPC error: {exc.message}"
+        ) from exc
     rpc.sendtoaddress(dealer1_addr, 100000, "", "", False, False, 1, "UNSET", False, l_usdt_asset)
     rpc.sendtoaddress(dealer2_addr, 100000, "", "", False, False, 1, "UNSET", False, l_usdt_asset)
     rpc.generatetoaddress(1, client_addr)
