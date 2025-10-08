@@ -5,7 +5,7 @@ from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import hashlib
 import json
 import time
-from decimal import Decimal, getcontext
+from decimal import Decimal, InvalidOperation, getcontext
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -139,9 +139,35 @@ def ensure_mature_lbtc_balance(
     mature) until the wallet's trusted balance meets ``target_balance``.
     """
 
+    def _parse_lbtc_amount(value) -> Decimal:
+        """Return the L-BTC amount from ``getbalances`` values."""
+
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            pass
+
+        if isinstance(value, dict):
+            # Elements >= 23 returns per-asset dictionaries. Prefer canonical keys.
+            for key in ("bitcoin", "lbtc", "L-BTC"):
+                if key in value:
+                    try:
+                        return Decimal(str(value[key]))
+                    except (InvalidOperation, TypeError, ValueError):
+                        break
+
+            # Fallback: use the first numeric-looking entry.
+            for amount in value.values():
+                try:
+                    return Decimal(str(amount))
+                except (InvalidOperation, TypeError, ValueError):
+                    continue
+
+        return Decimal("0")
+
     for _ in range(3):
         balances = rpc.getbalances()
-        trusted = Decimal(str(balances.get("mine", {}).get("trusted", "0")))
+        trusted = _parse_lbtc_amount(balances.get("mine", {}).get("trusted", "0"))
         if trusted >= target_balance:
             return trusted
 
