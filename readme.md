@@ -64,8 +64,10 @@ To unlock broader liquidity while keeping privacy guarantees, we propose augment
 ## Getting Started
 ### Prerequisites
 - Elements Core (`elementsd` / `elements-cli`) v0.21.0.3 or newer available in your `PATH`.
+- Elements must be compiled with wallet support (``--enable-wallet``) so commands like `blindpsbt`, `walletprocesspsbt`, and `dumpmasterblindingkey` exist.
 - Python 3.11 or later.
 - [`python-bitcoinrpc`](https://pypi.org/project/python-bitcoinrpc/) installed (see `requirements.txt`).
+- Ability to unlock the default Elements wallet (the demo signs messages and transactions).
 
 ### Run the Demo
 ```bash
@@ -81,6 +83,18 @@ python3 rfq_otc.py
 # 4. Inspect the blinded settlement transaction (optional)
 elements-cli -regtest gettransaction <txid>
 ```
+
+### Regtest readiness guardrail
+The demo now performs a pre-flight checklist before generating any addresses:
+
+1. **RPC connectivity** – Fails fast if the client cannot reach `elementsd` on regtest.
+2. **Chain validation** – Aborts when the node reports anything other than `regtest`/`liquidregtest`.
+3. **Wallet availability** – Confirms that a wallet with private keys is loaded and unlocked.
+4. **Critical RPC coverage** – Verifies support for `blindpsbt`, `walletprocesspsbt`, `dumpmasterblindingkey`, and `signmessage`.
+
+If a check fails, the script raises an `EnvironmentError` with explicit remediation steps
+(e.g., unlocking the wallet or upgrading Elements). Resolve the issue, rerun `setup_liquid_regtest.sh`,
+and execute the demo again.
 
 ## Next Steps
 Community contributions are welcome to prototype the Nostr trade-matching layer, integrate additional liquidity sources, or refine the UX for institutional desks. Feel free to open issues, share feedback, or suggest interoperable designs.
