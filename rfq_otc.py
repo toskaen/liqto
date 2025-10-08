@@ -1,7 +1,7 @@
 # rfq_otc.py - Confidential OTC Settlement on Liquid Network
 # Requires: elementsd running in regtest mode, python-bitcoinrpc
 
-from bitcoinrpc.authproxy import AuthServiceProxy
+from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import hashlib
 import json
 import time
@@ -44,6 +44,84 @@ class Quote:
 class LiquidRFQProtocol:
     def __init__(self, rpc_url: str):
         self.rpc = AuthServiceProxy(rpc_url)
+
+
+def ensure_regtest_readiness(rpc: AuthServiceProxy) -> dict:
+    """Validate that the connected Elements node can run the RFQ demo.
+
+    Returns a summary dictionary when all pre-flight checks pass. Raises an
+    ``EnvironmentError`` with actionable instructions when the regtest node is
+    not ready for the workflow.
+    """
+
+    try:
+        chain_info = rpc.getblockchaininfo()
+    except Exception as exc:  # pragma: no cover - network/IO guard
+        raise EnvironmentError(
+            "Cannot reach Elements RPC. Start regtest via ``setup_liquid_regtest.sh`` "
+            "or ensure elementsd is running with ``-regtest``."
+        ) from exc
+
+    chain = chain_info.get("chain", "")
+    if chain not in {"regtest", "liquidregtest"}:
+        raise EnvironmentError(
+            "RFQ demo requires a Liquid regtest node. Current chain is "
+            f"'{chain}'. Restart elementsd with ``-regtest`` or rerun the "
+            "setup script."
+        )
+
+    try:
+        wallet_info = rpc.getwalletinfo()
+    except Exception as exc:  # pragma: no cover - wallet guard
+        raise EnvironmentError(
+            "Wallet RPC is unavailable. Start elementsd with wallet support and "
+            "load or create a default wallet (``elements-cli -regtest createwallet "
+            "wallet``)."
+        ) from exc
+
+    if not wallet_info.get("private_keys_enabled", True):
+        raise EnvironmentError(
+            "Loaded wallet is watch-only. Re-run ``elements-cli -regtest createwallet`` "
+            "with private keys enabled or load a wallet that holds signing keys."
+        )
+
+    unlocked_until = wallet_info.get("unlocked_until")
+    if unlocked_until is not None and unlocked_until == 0:
+        raise EnvironmentError(
+            "Wallet is locked. Unlock it first using ``elements-cli -regtest "
+            "walletpassphrase <passphrase> 600``."
+        )
+
+    missing_cmds = []
+    for cmd in ("blindpsbt", "walletprocesspsbt", "dumpmasterblindingkey", "signmessage"):
+        try:
+            rpc.help(cmd)
+        except JSONRPCException:
+            missing_cmds.append(cmd)
+        except Exception as exc:  # pragma: no cover - unexpected RPC errors
+            raise EnvironmentError(
+                f"Unexpected RPC error while checking `{cmd}`: {exc}"
+            ) from exc
+
+    if missing_cmds:
+        joined = ", ".join(sorted(set(missing_cmds)))
+        raise EnvironmentError(
+            "Elements node is missing required wallet RPCs "
+            f"({joined}). Upgrade to Elements Core 0.21.0.3+ built with wallet "
+            "support."
+        )
+
+    network_info = rpc.getnetworkinfo()
+
+    return {
+        "chain": chain,
+        "blocks": chain_info.get("blocks"),
+        "warnings": chain_info.get("warnings"),
+        "wallet": wallet_info.get("walletname", ""),
+        "private_keys_enabled": wallet_info.get("private_keys_enabled", True),
+        "version": network_info.get("version"),
+        "subversion": network_info.get("subversion"),
+    }
         
     def create_rfq(self, client_addr: str, sell_asset: str, buy_asset: str,
                    approx_amount: float, expiry_seconds: int = 300) -> RFQ:
@@ -365,9 +443,24 @@ def demo_confidential_otc_settlement():
     rpc_url = f"http://{RPC_USER}:{RPC_PASS}@{RPC_HOST}:{RPC_PORT}"
     protocol = LiquidRFQProtocol(rpc_url)
     rpc = protocol.rpc
-    
+
     print("=== Confidential OTC Settlement Demo ===\n")
-    
+
+    print("Performing regtest readiness checks...")
+    readiness = ensure_regtest_readiness(rpc)
+    print(
+        "Connected to Elements "
+        f"{readiness.get('version')} {readiness.get('subversion')} on {readiness.get('chain')}"
+    )
+    if readiness.get("wallet"):
+        print(
+            f"Active wallet: {readiness['wallet']} (private keys enabled: "
+            f"{readiness['private_keys_enabled']})"
+        )
+    if readiness.get("warnings"):
+        print(f"Node warnings: {readiness['warnings']}")
+    print("")
+
     # Setup: Create addresses for client and dealers
     client_addr = rpc.getnewaddress("client", "blech32")
     dealer1_addr = rpc.getnewaddress("dealer1", "blech32")
