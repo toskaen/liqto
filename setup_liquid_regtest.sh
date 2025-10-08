@@ -15,6 +15,15 @@ fi
 RPC_USER="${LIQUID_RPC_USER:-user}"
 RPC_PASSWORD="${LIQUID_RPC_PASSWORD:-pass}"
 RPC_PORT="${LIQUID_RPC_PORT:-18884}"
+VALIDATE_PEGIN="${LIQUID_VALIDATE_PEGIN:-0}"
+
+if [ "${VALIDATE_PEGIN}" != "0" ]; then
+  cat >&2 <<'EOF'
+WARNING: validatepegin is enabled. Ensure a mainchain bitcoind instance is
+         running and accessible via the credentials configured for
+         elementsd, otherwise startup will fail.
+EOF
+fi
 DATA_ROOT="${LIQUID_DATA_DIR:-$HOME/.elements}"
 
 # Default to the modern chain alias introduced in Elements Core 23.x while
@@ -62,6 +71,7 @@ if ! cli getblockchaininfo >/dev/null 2>&1; then
     -rpcuser="${RPC_USER}" \
     -rpcpassword="${RPC_PASSWORD}" \
     -rpcport="${RPC_PORT}" \
+    -validatepegin="${VALIDATE_PEGIN}" \
     -fallbackfee=0.00001 \
     -txindex=1
   echo "Waiting for elementsd to start..."
