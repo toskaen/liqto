@@ -142,26 +142,42 @@ def ensure_mature_lbtc_balance(
     def _parse_lbtc_amount(value) -> Decimal:
         """Return the L-BTC amount from ``getbalances`` values."""
 
-        try:
-            return Decimal(str(value))
-        except (InvalidOperation, TypeError, ValueError):
-            pass
+        def _coerce_decimal(candidate) -> Optional[Decimal]:
+            """Attempt to turn ``candidate`` into a Decimal."""
+
+            if isinstance(candidate, dict):
+                # Newer Elements builds wrap per-asset balances with metadata.
+                for nested_key in ("amount", "value"):
+                    if nested_key in candidate:
+                        return _coerce_decimal(candidate[nested_key])
+                # Otherwise fall through and try each value.
+                for nested_val in candidate.values():
+                    coerced = _coerce_decimal(nested_val)
+                    if coerced is not None:
+                        return coerced
+                return None
+
+            try:
+                return Decimal(str(candidate))
+            except (InvalidOperation, TypeError, ValueError):
+                return None
+
+        direct = _coerce_decimal(value)
+        if direct is not None:
+            return direct
 
         if isinstance(value, dict):
             # Elements >= 23 returns per-asset dictionaries. Prefer canonical keys.
             for key in ("bitcoin", "lbtc", "L-BTC"):
-                if key in value:
-                    try:
-                        return Decimal(str(value[key]))
-                    except (InvalidOperation, TypeError, ValueError):
-                        break
+                coerced = _coerce_decimal(value.get(key))
+                if coerced is not None:
+                    return coerced
 
             # Fallback: use the first numeric-looking entry.
             for amount in value.values():
-                try:
-                    return Decimal(str(amount))
-                except (InvalidOperation, TypeError, ValueError):
-                    continue
+                coerced = _coerce_decimal(amount)
+                if coerced is not None:
+                    return coerced
 
         return Decimal("0")
 
