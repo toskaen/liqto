@@ -29,10 +29,10 @@ The `rfq_otc.py` script wires these pieces together to demonstrate an end-to-end
 Triple-check the MVP functionality with this short runbook:
 
 1. **Environment sanity** – Elements `0.21.0.3+` is on your `PATH`, Python is `3.11+`, and `python-bitcoinrpc` is installed.
-2. **Regtest boot** – `bash setup_liquid_regtest.sh` returns `Liquid regtest ready!` and `elements-cli -regtest getblockcount` succeeds.
+2. **Regtest boot** – `bash setup_liquid_regtest.sh` returns `Liquid regtest ready!` and `elements-cli -chain=elementsregtest getblockcount` succeeds.
 3. **RFQ loop** – `python3 rfq_otc.py` finishes with `✅ Settlement complete!` and prints the blinded transaction ID.
-4. **Privacy guarantees** – `elements-cli -regtest gettransaction <txid>` shows blinded outputs (amounts hidden).
-5. **Timelock assurance** – `elements-cli -regtest validateaddress <protected_address>` reveals the imported Miniscript descriptor containing `older(...)`.
+4. **Privacy guarantees** – `elements-cli -chain=elementsregtest gettransaction <txid>` shows blinded outputs (amounts hidden).
+5. **Timelock assurance** – `elements-cli -chain=elementsregtest validateaddress <protected_address>` reveals the imported Miniscript descriptor containing `older(...)`.
 
 If any step fails, wipe `~/.elements/regtest`, restart `elementsd`, and rerun the commands.
 
@@ -81,14 +81,14 @@ pip install -r requirements.txt
 python3 rfq_otc.py
 
 # 4. Inspect the blinded settlement transaction (optional)
-elements-cli -regtest gettransaction <txid>
+elements-cli -chain=elementsregtest gettransaction <txid>
 ```
 
 ### Regtest readiness guardrail
 The demo now performs a pre-flight checklist before generating any addresses:
 
 1. **RPC connectivity** – Fails fast if the client cannot reach `elementsd` on regtest.
-2. **Chain validation** – Aborts when the node reports anything other than `regtest`/`liquidregtest`.
+2. **Chain validation** – Aborts when the node reports anything other than `elementsregtest`/`liquidregtest`.
 3. **Wallet availability** – Confirms that a wallet with private keys is loaded and unlocked.
 4. **Critical RPC coverage** – Verifies support for `blindpsbt`, `walletprocesspsbt`, `dumpmasterblindingkey`, and `signmessage`.
 

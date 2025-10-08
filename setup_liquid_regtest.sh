@@ -16,22 +16,23 @@ RPC_USER="${LIQUID_RPC_USER:-user}"
 RPC_PASSWORD="${LIQUID_RPC_PASSWORD:-pass}"
 RPC_PORT="${LIQUID_RPC_PORT:-18884}"
 DATA_ROOT="${LIQUID_DATA_DIR:-$HOME/.elements}"
-REGTEST_DIR="${DATA_ROOT%/}/regtest"
+CHAIN_NAME="${LIQUID_CHAIN_NAME:-elementsregtest}"
+CHAIN_DIR="${DATA_ROOT%/}/${CHAIN_NAME}"
 WALLET_NAME="${LIQUID_WALLET_NAME:-test_wallet}"
 
 cli() {
-  elements-cli -regtest \
+  elements-cli -chain="${CHAIN_NAME}" \
     -datadir="${DATA_ROOT}" \
     -rpcuser="${RPC_USER}" \
     -rpcpassword="${RPC_PASSWORD}" \
     -rpcport="${RPC_PORT}" "$@"
 }
 
-mkdir -p "${REGTEST_DIR}"
+mkdir -p "${CHAIN_DIR}"
 
-echo "Ensuring elementsd is running (data dir: ${REGTEST_DIR})..."
+echo "Ensuring elementsd is running (data dir: ${CHAIN_DIR})..."
 if ! cli getblockchaininfo >/dev/null 2>&1; then
-  elementsd -regtest -daemon \
+  elementsd -chain="${CHAIN_NAME}" -daemon \
     -datadir="${DATA_ROOT}" \
     -rpcuser="${RPC_USER}" \
     -rpcpassword="${RPC_PASSWORD}" \
