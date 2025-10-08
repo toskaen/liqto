@@ -6,7 +6,7 @@ import itertools
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
-from urllib import request
+from urllib import error, request
 
 
 class JSONRPCException(RuntimeError):
@@ -90,8 +90,25 @@ class AuthServiceProxy:
 
     def _post(self, payload: bytes) -> bytes:
         req = request.Request(self._service_url, data=payload, headers=self._headers)
-        with request.urlopen(req, timeout=self._timeout) as response:
-            return response.read()
+        try:
+            with request.urlopen(req, timeout=self._timeout) as response:
+                return response.read()
+        except error.HTTPError as http_err:
+            # Elements returns JSON-RPC errors with HTTP 500 status codes. Parse the
+            # body (when available) and surface it as a ``JSONRPCException`` so
+            # callers receive the structured RPC error instead of a transport
+            # level ``HTTPError``.
+            body = http_err.read()
+            message = body.decode(errors="replace") if body else http_err.reason
+            try:
+                data = json.loads(message)
+            except json.JSONDecodeError:
+                raise JSONRPCException({"code": http_err.code, "message": message}) from http_err
+
+            if isinstance(data, dict) and data.get("error"):
+                raise JSONRPCException(data["error"]) from http_err
+
+            raise JSONRPCException({"code": http_err.code, "message": message}) from http_err
 
     def _extract_result(self, data: Dict[str, Any]) -> Any:
         if not isinstance(data, dict):
