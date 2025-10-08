@@ -478,7 +478,14 @@ def demo_confidential_otc_settlement():
     l_btc_asset = rpc.dumpassetlabels()['bitcoin']
     
     # For demo: issue L-USDt test asset
-    l_usdt_asset = rpc.issueasset(100000, 0)['asset']
+    try:
+        l_usdt_asset = rpc.issueasset(100000, 0)['asset']
+    except JSONRPCException as exc:
+        raise RuntimeError(
+            "Failed to issue demo asset. Ensure the regtest wallet has matured "
+            "L-BTC to cover issuance fees and supports confidential transactions. "
+            f"Underlying RPC error: {exc.message}"
+        ) from exc
     rpc.sendtoaddress(dealer1_addr, 100000, "", "", False, False, 1, "UNSET", False, l_usdt_asset)
     rpc.sendtoaddress(dealer2_addr, 100000, "", "", False, False, 1, "UNSET", False, l_usdt_asset)
     rpc.generatetoaddress(1, client_addr)
