@@ -50,6 +50,13 @@ mkdir -p "${CHAIN_DIR}"
 
 echo "Ensuring elementsd is running (data dir: ${CHAIN_DIR})..."
 if ! cli getblockchaininfo >/dev/null 2>&1; then
+  if pgrep -x elementsd >/dev/null 2>&1; then
+    echo "Detected running elementsd process, but it is not reachable with" >&2
+    echo "the configured credentials/chain (${CHAIN_NAME})." >&2
+    echo "If this is a different Elements instance, stop it before proceeding" >&2
+    echo "or ensure it was started with -chain=${CHAIN_NAME} and matches the" >&2
+    echo "RPC configuration used by this script." >&2
+  fi
   elementsd -chain="${CHAIN_NAME}" -daemon \
     -datadir="${DATA_ROOT}" \
     -rpcuser="${RPC_USER}" \
@@ -62,6 +69,11 @@ fi
 
 if ! cli -rpcwait -rpcwaittimeout=60 getblockchaininfo >/dev/null 2>&1; then
   echo "Failed to connect to elementsd RPC after waiting." >&2
+  if [ -f "${CHAIN_DIR}/debug.log" ]; then
+    echo "--- Tail of ${CHAIN_DIR}/debug.log ---" >&2
+    tail -n 20 "${CHAIN_DIR}/debug.log" >&2 || true
+    echo "--- End debug.log ---" >&2
+  fi
   exit 1
 fi
 
