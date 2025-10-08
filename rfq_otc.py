@@ -181,19 +181,117 @@ def ensure_mature_lbtc_balance(
 
         return Decimal("0")
 
-    for _ in range(3):
+    max_rounds = 8
+    last_balances = {}
+    for attempt in range(max_rounds):
         balances = rpc.getbalances()
+        last_balances = balances
         trusted = _parse_lbtc_amount(balances.get("mine", {}).get("trusted", "0"))
         if trusted >= target_balance:
             return trusted
 
+        # Newer Elements versions may briefly report mined outputs as immature
+        # before they transition to the trusted balance.  Capture that signal so
+        # we can keep mining until at least one batch matures.
+        immature = _parse_lbtc_amount(balances.get("mine", {}).get("immature", "0"))
+
+        if attempt == max_rounds - 1:
+            break
+
         # Mine another batch of blocks and re-check once confirmations accrue.
         rpc.generatetoaddress(101, mining_addr)
+        # When we observe immature rewards, poll a few extra times with small
+        # delays so the wallet has a chance to move them into the trusted
+        # balance before the next mining round starts.
+        if immature > 0:
+            for _ in range(4):
+                time.sleep(0.5)
+                balances = rpc.getbalances()
+                last_balances = balances
+                trusted = _parse_lbtc_amount(balances.get("mine", {}).get("trusted", "0"))
+                if trusted >= target_balance:
+                    return trusted
+
+    # Fallback to ``getbalance`` and ``getwalletinfo`` which some wallet
+    # configurations still rely on for matured native amounts.  Prefer the
+    # value that best satisfies the target to avoid regressing older Elements
+    # builds.
+    try:
+        wallet_balance = Decimal(str(rpc.getbalance()))
+    except (InvalidOperation, TypeError, ValueError):
+        wallet_balance = Decimal("0")
+
+    if wallet_balance >= target_balance:
+        return wallet_balance
+
+    wallet_info: dict = {}
+    try:
+        wallet_info = rpc.getwalletinfo()
+        info_balance = Decimal(str(wallet_info.get("balance", "0")))
+    except (InvalidOperation, TypeError, ValueError):
+        info_balance = Decimal("0")
+    except Exception:
+        info_balance = Decimal("0")
+
+    if info_balance >= target_balance:
+        return info_balance
+
+    # As a last resort, inspect confirmed UTXOs.  Some custom wallet setups do
+    # not surface trusted balances correctly until a rescan occurs even though
+    # the UTXOs are already spendable.
+    utxo_total = Decimal("0")
+    bitcoin_asset_id = None
+    try:
+        bitcoin_asset_id = rpc.dumpassetlabels().get("bitcoin")
+    except Exception:
+        bitcoin_asset_id = None
+
+    try:
+        utxos = rpc.listunspent(1, 999999, [], True)
+    except Exception:
+        utxos = []
+
+    for utxo in utxos:
+        asset_id = utxo.get("asset")
+        if bitcoin_asset_id and asset_id not in {bitcoin_asset_id, "bitcoin"}:
+            continue
+
+        confirmations = utxo.get("confirmations", 0)
+        # Elements reports coinbase outputs with the ``generated`` flag.  Only
+        # treat them as spendable once they reached the standard 100 confirmation
+        # maturity window to avoid using immature rewards.
+        if utxo.get("generated") and confirmations < 101:
+            continue
+
+        try:
+            amount = Decimal(str(utxo.get("amount", "0")))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+
+        utxo_total += amount
+        if utxo_total >= target_balance:
+            return utxo_total
+
+    trusted_snapshot = _parse_lbtc_amount(
+        last_balances.get("mine", {}).get("trusted", "0") if last_balances else "0"
+    )
+    immature_snapshot = _parse_lbtc_amount(
+        last_balances.get("mine", {}).get("immature", "0") if last_balances else "0"
+    )
+    info_immature = Decimal("0")
+    if wallet_info:
+        try:
+            info_immature = Decimal(str(wallet_info.get("immature_balance", "0")))
+        except (InvalidOperation, TypeError, ValueError):
+            info_immature = Decimal("0")
 
     raise RuntimeError(
         "Unable to obtain matured L-BTC for the demo even after mining. "
         "Verify your regtest node is not running with `-minrelaytxfee` too "
-        "high and that the wallet can receive block rewards."
+        "high and that the wallet can receive block rewards. "
+        f"Last trusted={trusted_snapshot}, immature={immature_snapshot}, "
+        f"wallet_balance={wallet_balance}, wallet_info_balance={info_balance}, "
+        f"wallet_info_immature={info_immature}."
     )
 
 
