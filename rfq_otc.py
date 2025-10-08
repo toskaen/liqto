@@ -5,7 +5,7 @@ from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import hashlib
 import json
 import time
-from decimal import Decimal, getcontext
+from decimal import Decimal, InvalidOperation, getcontext
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -139,9 +139,51 @@ def ensure_mature_lbtc_balance(
     mature) until the wallet's trusted balance meets ``target_balance``.
     """
 
+    def _parse_lbtc_amount(value) -> Decimal:
+        """Return the L-BTC amount from ``getbalances`` values."""
+
+        def _coerce_decimal(candidate) -> Optional[Decimal]:
+            """Attempt to turn ``candidate`` into a Decimal."""
+
+            if isinstance(candidate, dict):
+                # Newer Elements builds wrap per-asset balances with metadata.
+                for nested_key in ("amount", "value"):
+                    if nested_key in candidate:
+                        return _coerce_decimal(candidate[nested_key])
+                # Otherwise fall through and try each value.
+                for nested_val in candidate.values():
+                    coerced = _coerce_decimal(nested_val)
+                    if coerced is not None:
+                        return coerced
+                return None
+
+            try:
+                return Decimal(str(candidate))
+            except (InvalidOperation, TypeError, ValueError):
+                return None
+
+        direct = _coerce_decimal(value)
+        if direct is not None:
+            return direct
+
+        if isinstance(value, dict):
+            # Elements >= 23 returns per-asset dictionaries. Prefer canonical keys.
+            for key in ("bitcoin", "lbtc", "L-BTC"):
+                coerced = _coerce_decimal(value.get(key))
+                if coerced is not None:
+                    return coerced
+
+            # Fallback: use the first numeric-looking entry.
+            for amount in value.values():
+                coerced = _coerce_decimal(amount)
+                if coerced is not None:
+                    return coerced
+
+        return Decimal("0")
+
     for _ in range(3):
         balances = rpc.getbalances()
-        trusted = Decimal(str(balances.get("mine", {}).get("trusted", "0")))
+        trusted = _parse_lbtc_amount(balances.get("mine", {}).get("trusted", "0"))
         if trusted >= target_balance:
             return trusted
 
