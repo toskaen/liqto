@@ -29,12 +29,12 @@ The `rfq_otc.py` script wires these pieces together to demonstrate an end-to-end
 Triple-check the MVP functionality with this short runbook:
 
 1. **Environment sanity** – Elements `0.21.0.3+` is on your `PATH`, Python is `3.11+`, and `python-bitcoinrpc` is installed.
-2. **Regtest boot** – `bash setup_liquid_regtest.sh` returns `Liquid regtest ready!` and `elements-cli -chain=elementsregtest getblockcount` succeeds.
+2. **Regtest boot** – `bash setup_liquid_regtest.sh` returns `Liquid regtest ready!` and `elements-cli -chain=liquidregtest getblockcount` succeeds (pass `-chain=elementsregtest` if running an older Elements build).
 3. **RFQ loop** – `python3 rfq_otc.py` finishes with `✅ Settlement complete!` and prints the blinded transaction ID.
-4. **Privacy guarantees** – `elements-cli -chain=elementsregtest gettransaction <txid>` shows blinded outputs (amounts hidden).
+4. **Privacy guarantees** – `elements-cli -chain=liquidregtest gettransaction <txid>` shows blinded outputs (amounts hidden).
 5. **Timelock assurance** – `elements-cli -chain=elementsregtest validateaddress <protected_address>` reveals the imported Miniscript descriptor containing `older(...)`.
 
-If any step fails, wipe `~/.elements/regtest`, restart `elementsd`, and rerun the commands.
+If any step fails, wipe `~/.elements/liquidregtest` (or `~/.elements/elementsregtest` on older builds), restart `elementsd`, and rerun the commands.
 
 ## Unique Positioning for PlanB
 PlanB is prioritising venues that can aggregate **deep, private liquidity** for institutional OTC flows. LIQTO supports that mandate in three ways:
@@ -81,7 +81,7 @@ pip install -r requirements.txt
 python3 rfq_otc.py
 
 # 4. Inspect the blinded settlement transaction (optional)
-elements-cli -chain=elementsregtest gettransaction <txid>
+elements-cli -chain=liquidregtest gettransaction <txid>
 ```
 
 ### Regtest readiness guardrail

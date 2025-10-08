@@ -16,7 +16,25 @@ RPC_USER="${LIQUID_RPC_USER:-user}"
 RPC_PASSWORD="${LIQUID_RPC_PASSWORD:-pass}"
 RPC_PORT="${LIQUID_RPC_PORT:-18884}"
 DATA_ROOT="${LIQUID_DATA_DIR:-$HOME/.elements}"
-CHAIN_NAME="${LIQUID_CHAIN_NAME:-elementsregtest}"
+
+# Default to the modern chain alias introduced in Elements Core 23.x while
+# keeping backwards compatibility with the historic ``elementsregtest`` name.
+# Users occasionally export ``LIQUID_CHAIN_NAME=regtest`` (Bitcoin's testing
+# chain) which causes Elements to run in non-confidential mode and breaks
+# asset issuance.  Guard against that misconfiguration so the Python demo does
+# not fail later with a cryptic RPC 500 error.
+DEFAULT_CHAIN="liquidregtest"
+if [ "${LIQUID_CHAIN_NAME:-}" = "elementsregtest" ]; then
+  DEFAULT_CHAIN="elementsregtest"
+fi
+CHAIN_NAME="${LIQUID_CHAIN_NAME:-$DEFAULT_CHAIN}"
+
+if [ "${CHAIN_NAME}" = "regtest" ]; then
+  echo "ERROR: LIQUID_CHAIN_NAME=regtest selects Bitcoin's regtest network." >&2
+  echo "       Re-run without that override or set LIQUID_CHAIN_NAME=liquidregtest" >&2
+  echo "       so Elements starts an issuance-capable chain." >&2
+  exit 1
+fi
 CHAIN_DIR="${DATA_ROOT%/}/${CHAIN_NAME}"
 WALLET_NAME="${LIQUID_WALLET_NAME:-test_wallet}"
 
@@ -44,6 +62,14 @@ fi
 
 if ! cli -rpcwait -rpcwaittimeout=60 getblockchaininfo >/dev/null 2>&1; then
   echo "Failed to connect to elementsd RPC after waiting." >&2
+  exit 1
+fi
+
+actual_chain=$(cli getblockchaininfo | awk -F'"' '/"chain"/ {print $4; exit}')
+if [ "${actual_chain}" != "${CHAIN_NAME}" ]; then
+  echo "ERROR: elementsd is running on '${actual_chain}', expected '${CHAIN_NAME}'." >&2
+  echo "       Remove the existing data directory at ${CHAIN_DIR} or stop any" >&2
+  echo "       conflicting daemon, then rerun this script." >&2
   exit 1
 fi
 

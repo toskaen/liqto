@@ -59,15 +59,16 @@ def ensure_regtest_readiness(rpc: AuthServiceProxy) -> dict:
     except Exception as exc:  # pragma: no cover - network/IO guard
         raise EnvironmentError(
             "Cannot reach Elements RPC. Start regtest via ``setup_liquid_regtest.sh`` "
-            "or ensure elementsd is running with ``-chain=elementsregtest``."
+            "or ensure elementsd is running with ``-chain=liquidregtest`` (``-chain=""
+            "elementsregtest`` on older versions)."
         ) from exc
 
     chain = chain_info.get("chain", "")
     if chain not in {"elementsregtest", "liquidregtest"}:
         raise EnvironmentError(
             "RFQ demo requires a Liquid regtest node. Current chain is "
-            f"'{chain}'. Restart elementsd with ``-chain=elementsregtest`` or "
-            "rerun the setup script."
+            f"'{chain}'. Restart elementsd with ``-chain=liquidregtest`` (or ``-chain=""
+            "elementsregtest`` for legacy builds) or rerun the setup script."
         )
 
     try:
@@ -75,22 +76,24 @@ def ensure_regtest_readiness(rpc: AuthServiceProxy) -> dict:
     except Exception as exc:  # pragma: no cover - wallet guard
         raise EnvironmentError(
             "Wallet RPC is unavailable. Start elementsd with wallet support and "
-            "load or create a default wallet (``elements-cli -chain=elementsregtest "
-            "createwallet wallet``)."
+            "load or create a default wallet (``elements-cli -chain=liquidregtest "
+            "createwallet wallet``; replace the chain with ``elementsregtest`` when "
+            "using older builds)."
         ) from exc
 
     if not wallet_info.get("private_keys_enabled", True):
         raise EnvironmentError(
-            "Loaded wallet is watch-only. Re-run ``elements-cli -chain=elementsregtest "
-            "createwallet`` with private keys enabled or load a wallet that holds "
-            "signing keys."
+            "Loaded wallet is watch-only. Re-run ``elements-cli -chain=liquidregtest "
+            "createwallet`` with private keys enabled (use ``elementsregtest`` on "
+            "older versions) or load a wallet that holds signing keys."
         )
 
     unlocked_until = wallet_info.get("unlocked_until")
     if unlocked_until is not None and unlocked_until == 0:
         raise EnvironmentError(
             "Wallet is locked. Unlock it first using ``elements-cli "
-            "-chain=elementsregtest walletpassphrase <passphrase> 600``."
+            "-chain=liquidregtest walletpassphrase <passphrase> 600`` (or replace "
+            "the chain argument with ``elementsregtest`` on legacy builds)."
         )
 
     missing_cmds = []
