@@ -11,8 +11,8 @@ This document consolidates the minimum viable product (MVP) definition, validati
 | Capability | Code Anchor | Validation Command |
 |------------|-------------|--------------------|
 | Confidential settlement via blinded PSET | `LiquidRFQProtocol.create_atomic_settlement` | `python3 rfq_otc.py` → look for `✅ Settlement complete!` |
-| Bilateral signatures with reclaim path | `LiquidRFQProtocol.build_joint_timelocked_address` | `elements-cli -chain=elementsregtest validateaddress <protected_address>` |
-| Authentic Liquid RPC integration | `LiquidRFQProtocol.__init__` / `AuthServiceProxy` | `elements-cli -chain=elementsregtest getblockcount` while demo runs |
+| Bilateral signatures with reclaim path | `LiquidRFQProtocol.build_joint_timelocked_address` | `elements-cli -chain=liquidregtest validateaddress <protected_address>` |
+| Authentic Liquid RPC integration | `LiquidRFQProtocol.__init__` / `AuthServiceProxy` | `elements-cli -chain=liquidregtest getblockcount` while demo runs |
 | Deterministic quoting spread | `OTCDesk.process_rfq` | Inspect printed dealer quotes in demo output |
 
 ## MVP Acceptance Criteria
@@ -25,10 +25,10 @@ This document consolidates the minimum viable product (MVP) definition, validati
 1. Launch regtest – `bash setup_liquid_regtest.sh`.
 2. Install dependencies – `pip install -r requirements.txt`.
 3. Execute demo – `python3 rfq_otc.py`.
-4. Inspect transaction – `elements-cli -chain=elementsregtest gettransaction <txid>`.
-5. Validate descriptor – `elements-cli -chain=elementsregtest validateaddress <protected_address>`.
+4. Inspect transaction – `elements-cli -chain=liquidregtest gettransaction <txid>`.
+5. Validate descriptor – `elements-cli -chain=liquidregtest validateaddress <protected_address>`.
 
-If a step fails, restart `elementsd` and re-run from step 1. Regtest data lives under `~/.elements/regtest` and can be safely deleted to reset.
+If a step fails, restart `elementsd` and re-run from step 1. Regtest data lives under `~/.elements/liquidregtest` (or `~/.elements/elementsregtest` on older versions) and can be safely deleted to reset.
 
 ## PlanB Positioning Notes
 - **Deep & private liquidity:** The flow assumes multiple dealers, each sourcing their own inventory, while the settlement remains confidential. Liquidity depth is represented by the ability to plug additional OTCDesk instances without altering the protocol layer.
